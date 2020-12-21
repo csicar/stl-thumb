@@ -1,9 +1,12 @@
 extern crate cgmath;
 extern crate stl_io;
+extern crate tobj;
 
+use std::collections::hash_map::HashMap;
 use std::error::Error;
-use std::fs::File;
 use std::fmt;
+use std::fs::File;
+use std::io::BufReader;
 
 #[derive(Copy, Clone)]
 pub struct Vertex {
@@ -95,6 +98,66 @@ pub struct Mesh {
 }
 
 impl Mesh {
+    pub fn from_obj(mut obj_file: File) -> Result<Mesh, Box<dyn Error>> {
+        let mut input = BufReader::new(obj_file);
+        let (models, _) =
+            tobj::load_obj_buf(&mut input, true, |_| Ok((Vec::new(), HashMap::new())))?;
+        // let mut vertices = Vec::new();
+        // let mut normals = Vec::new();
+        // let mut indices = Vec::new();
+        // for model in &models {
+        //     let p = &model.mesh.positions;
+        //     for i in (0..p.len()).step_by(3) {
+        //         vertices.push(Vertex { position: [p[i], p[i+1], p[i+2]]});
+        //     }
+        //     let n = &model.mesh.normals;
+        //     for i in (0..n.len()).step_by(3) {
+        //         for _ in 0..3 {
+        //             normals.push(Normal {normal: [n[i], n[i+1], n[i+2]]});
+        //         }
+        //     }
+        //     let idx = &model.mesh.indices;
+        //     indices.append(&mut idx.iter().map(|i| {*i as usize}).collect());
+        // };
+        let mut mesh = Mesh {
+            vertices: Vec::new(),
+            normals: Vec::new(),
+            indices: Vec::new(),
+            bounds: BoundingBox {
+                min: cgmath::Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                max: cgmath::Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            },
+            stl_had_normals: true,
+        };
+        for model in &models {
+            let p = &model.mesh.positions;
+            let tri_idx = &model.mesh.indices;
+            for i in (0..tri_idx.len()).step_by(3) {
+                let index0: usize = tri_idx[i] as usize;
+                let index1: usize = tri_idx[i + 1] as usize;
+                let index2: usize = tri_idx[i + 2] as usize;
+                let vertices = [
+                    ([p[index0 * 3], p[index0 * 3 + 1], p[index0 * 3 + 2]]),
+                    ([p[index1 * 3], p[index1 * 3 + 1], p[index1 * 3 + 2]]),
+                    ([p[index2 * 3], p[index2 * 3 + 1], p[index2 * 3 + 2]]),
+                ];
+                mesh.process_tri(&stl_io::Triangle {
+                    normal: [0.0, 0.0, 0.0],
+                    vertices: vertices,
+                });
+                print!("{:?}", vertices);
+            }
+        }
+        return Ok(mesh);
+    }
     pub fn from_stl(mut stl_file: File) -> Result<Mesh, Box<dyn Error>> {
         //let stl = stl_io::read_stl(&mut stl_file)?;
         //debug!("{:?}", stl);
