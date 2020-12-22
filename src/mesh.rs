@@ -102,58 +102,54 @@ impl Mesh {
         let mut input = BufReader::new(obj_file);
         let (models, _) =
             tobj::load_obj_buf(&mut input, true, |_| Ok((Vec::new(), HashMap::new())))?;
-        // let mut vertices = Vec::new();
-        // let mut normals = Vec::new();
-        // let mut indices = Vec::new();
-        // for model in &models {
-        //     let p = &model.mesh.positions;
-        //     for i in (0..p.len()).step_by(3) {
-        //         vertices.push(Vertex { position: [p[i], p[i+1], p[i+2]]});
-        //     }
-        //     let n = &model.mesh.normals;
-        //     for i in (0..n.len()).step_by(3) {
-        //         for _ in 0..3 {
-        //             normals.push(Normal {normal: [n[i], n[i+1], n[i+2]]});
-        //         }
-        //     }
-        //     let idx = &model.mesh.indices;
-        //     indices.append(&mut idx.iter().map(|i| {*i as usize}).collect());
-        // };
+        let first_mesh = &models.iter().next().ok_or("Empty Model")?.mesh;
+        let mut first_vertex = first_mesh
+            .positions
+            .iter();
         let mut mesh = Mesh {
-            vertices: Vec::new(),
-            normals: Vec::new(),
-            indices: Vec::new(),
-            bounds: BoundingBox {
-                min: cgmath::Point3 {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 0.0,
-                },
-                max: cgmath::Point3 {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 0.0,
-                },
-            },
+            vertices: Vec::with_capacity(first_mesh.positions.len() / 3),
+            normals: Vec::with_capacity(first_mesh.normals.len() / 3),
+            indices: Vec::with_capacity(first_mesh.indices.len() / 3),
+            bounds: BoundingBox::new(&[
+                *first_vertex.next().ok_or("Empty Mesh")?,
+                *first_vertex.next().ok_or("Empty Mesh")?,
+                *first_vertex.next().ok_or("Empty Mesh")?,
+            ]),
             stl_had_normals: true,
         };
         for model in &models {
-            let p = &model.mesh.positions;
             let tri_idx = &model.mesh.indices;
+            let p = &model.mesh.positions;
+            let n = &model.mesh.normals;
             for i in (0..tri_idx.len()).step_by(3) {
                 let index0: usize = tri_idx[i] as usize;
                 let index1: usize = tri_idx[i + 1] as usize;
                 let index2: usize = tri_idx[i + 2] as usize;
+
                 let vertices = [
                     ([p[index0 * 3], p[index0 * 3 + 1], p[index0 * 3 + 2]]),
                     ([p[index1 * 3], p[index1 * 3 + 1], p[index1 * 3 + 2]]),
                     ([p[index2 * 3], p[index2 * 3 + 1], p[index2 * 3 + 2]]),
                 ];
-                mesh.process_tri(&stl_io::Triangle {
-                    normal: [0.0, 0.0, 0.0],
-                    vertices: vertices,
-                });
-                print!("{:?}", vertices);
+                for v in vertices.iter() {
+                    mesh.bounds.expand(&v);
+                    mesh.vertices.push(Vertex { position: *v });
+                    //debug!("{:?}", v);
+                }
+
+                let normals = if n.len() > 0 {
+                    [
+                        ([n[index0 * 3], n[index0 * 3 + 1], n[index0 * 3 + 2]]),
+                        ([n[index1 * 3], n[index1 * 3 + 1], n[index1 * 3 + 2]]),
+                        ([n[index2 * 3], n[index2 * 3 + 1], n[index2 * 3 + 2]]),
+                    ]
+                } else {
+                    let n = normal(vertices);
+                    [n, n, n]
+                };
+                for normal in normals.iter() {
+                    mesh.normals.push(Normal { normal: *normal });
+                }
             }
         }
         return Ok(mesh);
@@ -189,7 +185,7 @@ impl Mesh {
             warn!("STL file missing surface normals");
         }
         info!("Bounds:");
-        info!("{}",mesh.bounds);
+        info!("{}", mesh.bounds);
         info!("Center:\t{:?}", mesh.bounds.center());
         info!("Triangles processed:\t{}\n", face_count);
 
@@ -199,25 +195,21 @@ impl Mesh {
     fn process_tri(&mut self, tri: &stl_io::Triangle) {
         for v in tri.vertices.iter() {
             self.bounds.expand(&v);
-            self.vertices.push( Vertex {
-                position: *v,
-            });
+            self.vertices.push(Vertex { position: *v });
             //debug!("{:?}", v);
         }
         // Use normal from STL file if it is provided, otherwise calculate it ourselves
         let n: stl_io::Normal;
         if tri.normal == [0.0, 0.0, 0.0] {
             self.stl_had_normals = false;
-            n = normal(&tri);
+            n = normal(tri.vertices);
         } else {
             n = tri.normal;
         }
         //debug!("{:?}",tri.normal);
         // TODO: Figure out how to get away with 1 normal instead of 3
         for _ in 0..3 {
-            self.normals.push( Normal{
-                normal: n,
-            });
+            self.normals.push(Normal { normal: n });
         }
     }
 
@@ -260,17 +252,13 @@ impl fmt::Display for Mesh {
 // TODO: The GPU can probably do this a lot faster than we can.
 // See if there is an option for offloading this.
 // Probably need to use a geometry shader (not supported in Opengl ES).
-fn normal(tri: &stl_io::Triangle) -> stl_io::Normal {
-    let p1: cgmath::Vector3<f32> = tri.vertices[0].into();
-    let p2: cgmath::Vector3<f32> = tri.vertices[1].into();
-    let p3: cgmath::Vector3<f32> = tri.vertices[2].into();
+fn normal(vertices: [[f32; 3]; 3]) -> stl_io::Normal {
+    let p1: cgmath::Vector3<f32> = vertices[0].into();
+    let p2: cgmath::Vector3<f32> = vertices[1].into();
+    let p3: cgmath::Vector3<f32> = vertices[2].into();
     let v = p2 - p1;
     let w = p3 - p1;
     let n = v.cross(w);
     let mag = n.x.abs() + n.y.abs() + n.z.abs();
-    [
-        n.x / mag,
-        n.y / mag,
-        n.z / mag,
-    ]
+    [n.x / mag, n.y / mag, n.z / mag]
 }
