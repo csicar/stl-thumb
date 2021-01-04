@@ -19,4 +19,16 @@ shared-mime-info package.
     <alias type="model/x.stl-ascii"/>
     <alias type="model/x.stl-binary"/>
   </mime-type>
+  <mime-type type="model/obj">
+    <_comment>Obj Wavefront 3D model</_comment>
+    <acronym>OBJ</acronym>
+    <expanded-acronym>Wavefront obj file</expanded-acronym>
+    <magic priority="50">
+      <match type="string" value="solid" offset="0"/>
+      <match type="string" value="SOLID" offset="0"/>
+    </magic>
+    <glob pattern="*.obj"/>
+    <alias type="model/x.obj-ascii"/>
+    <alias type="model/x.obj-binary"/>
+  </mime-type>
 </mime-info>
